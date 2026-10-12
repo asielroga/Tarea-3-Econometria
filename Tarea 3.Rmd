@@ -1,0 +1,560 @@
+---
+title: "Tarea 3"
+output: html_document
+date: "2026-10-12"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r}
+#Librerías a usar
+library(quantmod)
+library(car)
+library(lmtest)
+library(dynlm)
+```
+
+#Se ha elegido como variable dependiente a Microsoft y se harán 3 modelos de relación con esta acción
+```{r}
+#Obtención de todas las variables
+getSymbols(c("MSFT",
+             # Modelo A: Sector tecnológico
+             "AAPL","NVDA","AVGO","ADBE","ORCL",
+             # Modelo B: Diferente sector acciones aleateorias
+             "JPM","JNJ","XOM","PG","CAT",
+             # Modelo C: Comparaiva contra ETF's e indicadores
+             "SPY","XLK","IGV","SMH","TLT"),
+           from="2019-11-30")
+```
+
+#Obtenemos los vectores de cierre de cada variable
+```{r}
+msft_close <- MSFT$MSFT.Close
+
+aapl_close <- AAPL$AAPL.Close
+nvda_close <- NVDA$NVDA.Close
+avgo_close <- AVGO$AVGO.Close
+adbe_close <- ADBE$ADBE.Close
+orcl_close <- ORCL$ORCL.Close
+
+jpm_close  <- JPM$JPM.Close
+jnj_close  <- JNJ$JNJ.Close
+xom_close  <- XOM$XOM.Close
+pg_close   <- PG$PG.Close
+cat_close  <- CAT$CAT.Close
+
+spy_close  <- SPY$SPY.Close
+xlk_close  <- XLK$XLK.Close
+igv_close  <- IGV$IGV.Close
+smh_close  <- SMH$SMH.Close
+tlt_close  <- TLT$TLT.Close
+```
+
+## Quitamos datos en blanco y consolidamos en 3 matrices diferentes los precios de cierre de los 3 modelos
+```{r}
+prices_A <- na.omit(merge(msft_close, aapl_close, nvda_close, avgo_close, adbe_close, orcl_close))
+colnames(prices_A) <- c("MSFT","AAPL","NVDA","AVGO","ADBE","ORCL")
+
+prices_B <- na.omit(merge(msft_close, jpm_close, jnj_close, xom_close, pg_close, cat_close))
+colnames(prices_B) <- c("MSFT","JPM","JNJ","XOM","PG","CAT")
+
+prices_C <- na.omit(merge(msft_close, spy_close, xlk_close, igv_close, smh_close, tlt_close))
+colnames(prices_C) <- c("MSFT","SPY","XLK","IGV","SMH","TLT")
+```
+
+##Creamos una función de retornos para los diferentes días (1,5,30)
+```{r}
+ret_k <- function(x, k){
+  x <- as.numeric(x)
+  n <- length(x)
+  log(x[(k+1):n] / x[1:(n-k)])
+}
+```
+
+
+##Para cada modelo haremos un analisis de 1, 5 y 30 días además de probar Autocorrelación, VIF, Homostesceidad y Multicolinealidad
+#MODELO A: VARIABLES MISMO SECTOR
+
+##Modelo A: 1 DÍA
+```{r}
+dfA_1 <- data.frame(
+  MSFT = ret_k(prices_A[,"MSFT"], 1),
+  AAPL = ret_k(prices_A[,"AAPL"], 1),
+  NVDA = ret_k(prices_A[,"NVDA"], 1),
+  AVGO = ret_k(prices_A[,"AVGO"], 1),
+  ADBE = ret_k(prices_A[,"ADBE"], 1),
+  ORCL = ret_k(prices_A[,"ORCL"], 1)
+)
+
+modeloA_1 <- lm(MSFT ~ AAPL + NVDA + AVGO + ADBE + ORCL, data=dfA_1)
+
+```
+##Resumen del modelo a 1 día
+```{r}
+summary(modeloA_1)
+```
+###El modelo es estadísticamente muy fuerte. La prueba F es altamente significativa (p < 2.2e-16), lo que indica que, en conjunto, AAPL, NVDA, AVGO, ADBE y ORCL explican de forma relevante los rendimientos diarios de MSFT.
+###Alto poder explicativo para retornos diarios. El R ajustado es de alrededor de 61.5% de la variación diaria del rendimiento de MSFT se asocia linealmente con estas 5 acciones del sector tecnológico. Esto sugiere un comovimiento fuerte de MSFT con el sector tecnológico.
+
+##Multicolinealidad
+```{r}
+cor(dfA_1[, c("AAPL","NVDA","AVGO","ADBE","ORCL")])
+vif(modeloA_1)
+```
+###Las correlaciones entre las variables son moderadas y los VIF están entre 1.37 y 2.14 que son considerados bajos, lo cual sugiere que los coeficientes no están distorsionados fuertemente por redundancia entre variables
+
+##Homocedasticidad
+```{r}
+bptest(modeloA_1)
+gqtest(modeloA_1, order.by = ~ MSFT, data=dfA_1)
+```
+###Si hay varianza no constante indicada en ambas pruebas lo que indica que los errores cambian variabilizan con el tiempo.
+
+##Autocorrelación
+```{r}
+dwtest(modeloA_1)
+```
+###No hay evidencia de autocorrelación en los errores al estar cerca de 2
+
+##Serie de tiempo y su autocorrelación
+```{r}
+serieA_1 <- ts(resid(modeloA_1))
+regA_1 <- dynlm(serieA_1 ~ L(serieA_1))
+regA_1
+dwtest(regA_1)
+```
+
+###Como en la autocorrelación de antes el resultado sugiere que los errores no presentan autocorrelación positiva relevante, lo cual es bueno para el supuesto de independencia temporal.
+
+###Conclusión: A 1 día, MSFT se mueve fuertemente con otras acciones tecnológicas (especialmente AAPL y ADBE), por lo que un portafolio concentrado en tecnlogía tiende a estar expuesto al mismo sector.
+
+##Modelo A: 5 DÍAS
+```{r}
+#Plazo a 5 días
+dfA_5 <- data.frame(
+  MSFT = ret_k(prices_A[,"MSFT"], 5),
+  AAPL = ret_k(prices_A[,"AAPL"], 5),
+  NVDA = ret_k(prices_A[,"NVDA"], 5),
+  AVGO = ret_k(prices_A[,"AVGO"], 5),
+  ADBE = ret_k(prices_A[,"ADBE"], 5),
+  ORCL = ret_k(prices_A[,"ORCL"], 5)
+)
+
+modeloA_5 <- lm(MSFT ~ AAPL + NVDA + AVGO + ADBE + ORCL, data=dfA_5)
+```
+
+##Resumen del modelo a 5 días
+```{r}
+summary(modeloA_5)
+```
+### En conjunto, las 5 acciones tecnológicas si explican estadísticamente el retorno de Microsoft a 5 días, el R ajustado indica que a entre más plazo menos atracción entre sí pero sigue siendo un poco alto considerando que son 5 acciones involucradas.
+
+##Multicolinealidad
+```{r}
+cor(dfA_5[, c("AAPL","NVDA","AVGO","ADBE","ORCL")])
+vif(modeloA_5)
+```
+###A 5 días, aunque las variables tecnológicas tienen correlaciones moderadas, los VIF entre 1.36 y 1.95 indican multicolinealidad baja, por lo que no se observa un problema relevante de redundancia entre regresores.
+
+##Homocedasticidad
+```{r}
+bptest(modeloA_5)
+gqtest(modeloA_5, order.by = ~ MSFT, data=dfA_5)
+```
+###Existe evidencia clara de heterocedasticidad, los errores pueden no ser completamente confiables como inferencia.
+
+##Autocorrelación
+```{r}
+dwtest(modeloA_5)
+```
+###La prueba indica autocorrelación positiva muy fuerte
+
+##Serie de tiempo y su autocorrelación
+```{r}
+serieA_5 <- ts(resid(modeloA_5))
+regA_5 <- dynlm(serieA_5 ~ L(serieA_5))
+regA_5
+dwtest(regA_5)
+```
+###Existe persistencia en los errores del periodo pasado pero existe evidencia de autocorrelación positiva, por lo tanto el supuesto de independencia de errores no se cumple
+
+###Conclusión: A 5 días, Microsoft sigue muy ligada al comportamiento del sector tecnológico, sin embargo por las pruebas de autocorrelación y heterocedasticidad el modelo no es completamente estable para tomar una desición de estrategia.
+
+##Modelo A: 30 DÍAS
+```{r}
+dfA_30 <- data.frame(
+  MSFT = ret_k(prices_A[,"MSFT"], 30),
+  AAPL = ret_k(prices_A[,"AAPL"], 30),
+  NVDA = ret_k(prices_A[,"NVDA"], 30),
+  AVGO = ret_k(prices_A[,"AVGO"], 30),
+  ADBE = ret_k(prices_A[,"ADBE"], 30),
+  ORCL = ret_k(prices_A[,"ORCL"], 30)
+)
+
+modeloA_30 <- lm(MSFT ~ AAPL + NVDA + AVGO + ADBE + ORCL, data=dfA_30)
+```
+
+##Resumen del modelo a 30 días
+```{r}
+summary(modeloA_30)
+```
+###En conjunto, las 5 acciones tech explican de forma estadísticamente sólida los retornos de MSFT a 30 días.
+
+##Multicolinealidad
+```{r}
+cor(dfA_30[, c("AAPL","NVDA","AVGO","ADBE","ORCL")])
+vif(modeloA_30)
+```
+###multicolinealidad baja, no parece que los coeficientes estén inestables por redundancia fuerte entre regresores.
+
+##Homocedasticidad
+```{r}
+bptest(modeloA_30)
+gqtest(modeloA_30, order.by = ~ MSFT, data=dfA_30)
+```
+###Hay evidencia clara de heterocedasticidad: la varianza de los errores cambia (probablemente por cambios de volatilidad en el mercado).
+
+##Autocorrelación
+```{r}
+dwtest(modeloA_30)
+```
+###Autocorrelación positiva muy fuerte en los residuales.
+
+##Serie de tiempo y su autocorrelación
+```{r}
+serieA_30 <- ts(resid(modeloA_30))
+regA_30 <- dynlm(serieA_30 ~ L(serieA_30))
+regA_30
+dwtest(regA_30)
+```
+###Conclusión: A 30 días, MSFT está muy expuesta al sector tecnológico, por lo que no convendría diversificar entre acciones de este mismo sector
+
+#MODELO B: VARIABLES DIFERENTE SECTOR
+
+##Modelo B 1 día
+```{r}
+dfB_1 <- data.frame(
+  MSFT = ret_k(prices_B[,"MSFT"], 1),
+  JPM  = ret_k(prices_B[,"JPM"], 1),
+  JNJ  = ret_k(prices_B[,"JNJ"], 1),
+  XOM  = ret_k(prices_B[,"XOM"], 1),
+  PG   = ret_k(prices_B[,"PG"], 1),
+  CAT  = ret_k(prices_B[,"CAT"], 1)
+)
+modeloB_1 <- lm(MSFT ~ JPM + JNJ + XOM + PG + CAT, data=dfB_1)
+```
+
+##Resumen del modelo a 1 día
+```{r}
+summary(modeloB_1)
+```
+###El R ajustado es bastante bajo por lo que no hay relación fuerte, variable con mayor relación sería JPM(0.291) y PG (0.333), por lo tanto explicaría poco un posible resultado de la acción de Microsfot
+
+##Multicolinealidad
+```{r}
+cor(dfB_1[, c("JPM","JNJ","XOM","PG","CAT")])
+vif(modeloB_1)
+```
+### Baja al tener correlaciones moderadas entre 1.44 y 1.79
+
+##Homocedasticidad
+```{r}
+bptest(modeloB_1)
+gqtest(modeloB_1, order.by = ~ MSFT, data=dfB_1)
+```
+###No hay evidencia de heterocedasticidad (BP p=0.13, GQ p=0.26)
+
+##Autocorrelación
+```{r}
+dwtest(modeloB_1)
+```
+
+##Serie de tiempo y su autocorrelación
+```{r}
+serieB_1 <- ts(resid(modeloB_1))
+regB_1 <- dynlm(serieB_1 ~ L(serieB_1))
+regB_1
+dwtest(regB_1)
+```
+###No hay evidencia de autocorrelación.
+
+###Conclusión: Modelo de sectores diferentes a 1 día no termina por explicar un posible movimiento de la acción de Microsoft
+
+##Modelo B 5 días
+```{r}
+dfB_5 <- data.frame(
+  MSFT = ret_k(prices_B[,"MSFT"], 5),
+  JPM  = ret_k(prices_B[,"JPM"], 5),
+  JNJ  = ret_k(prices_B[,"JNJ"], 5),
+  XOM  = ret_k(prices_B[,"XOM"], 5),
+  PG   = ret_k(prices_B[,"PG"], 5),
+  CAT  = ret_k(prices_B[,"CAT"], 5)
+)
+
+modeloB_5 <- lm(MSFT ~ JPM + JNJ + XOM + PG + CAT, data=dfB_5)
+```
+
+##Resumen del modelo a 1 día
+```{r}
+summary(modeloB_5)
+```
+###El R ajustado es incluso más bajo que 1 día, esto hace que el explicar una posible relación entre las acciones y Microsoft sea casi nula.
+
+##Multicolinealidad
+```{r}
+cor(dfB_5[, c("JPM","JNJ","XOM","PG","CAT")])
+vif(modeloB_5)
+```
+### Mantiene baja Multicolinealidad como a 1 día (VIF ~1.40–1.68).
+
+##Homocedasticidad
+```{r}
+bptest(modeloB_5)
+gqtest(modeloB_5, order.by = ~ MSFT, data=dfB_5)
+```
+###Sin evidencia de heterocedasticidad (BP p=0.18, GQ p=0.60).
+
+##Autocorrelación
+```{r}
+dwtest(modeloB_5)
+```
+###
+
+##Serie de tiempo y su autocorrelación
+```{r}
+serieB_5 <- ts(resid(modeloB_5))
+regB_5 <- dynlm(serieB_5 ~ L(serieB_5))
+regB_5
+dwtest(regB_5)
+```
+### Existe una fuerte autocorelación con prueba DW=0.425 y DW=1.87 
+
+###Conclusión: el modelo tiene poca explicación y además viola independencia temporal a 5 días
+
+##Modelo B 30 días
+```{r}
+dfB_30 <- data.frame(
+  MSFT = ret_k(prices_B[,"MSFT"], 30),
+  JPM  = ret_k(prices_B[,"JPM"], 30),
+  JNJ  = ret_k(prices_B[,"JNJ"], 30),
+  XOM  = ret_k(prices_B[,"XOM"], 30),
+  PG   = ret_k(prices_B[,"PG"], 30),
+  CAT  = ret_k(prices_B[,"CAT"], 30)
+)
+
+modeloB_30 <- lm(MSFT ~ JPM + JNJ + XOM + PG + CAT, data=dfB_30)
+```
+
+##Resumen del modelo a 30 días
+```{r}
+summary(modeloB_30)
+```
+###Similar a 1 día, sigue bajo.
+
+##Multicolinealidad
+```{r}
+cor(dfB_30[, c("JPM","JNJ","XOM","PG","CAT")])
+vif(modeloB_30)
+```
+###Baja (VIF ~1.25–1.69).
+
+##Homocedasticidad
+```{r}
+bptest(modeloB_30)
+gqtest(modeloB_30, order.by = ~ MSFT, data=dfB_30)
+```
+###Fuerte (BP p<2e-16, GQ p=0.0034).
+
+##Autocorrelación
+```{r}
+dwtest(modeloB_30)
+```
+##Serie de tiempo y su autocorrelación
+```{r}
+serieB_30 <- ts(resid(modeloB_30))
+regB_30 <- dynlm(serieB_30 ~ L(serieB_30))
+regB_30
+dwtest(regB_30)
+```
+### muy fuerte en el modelo original (DW≈0.095, p<2e-16), pero al modelar en serie no se observa autocorrelación (DW=2.07)
+
+###Conclusión: Buen modelo para mostrar diversificación sectorial, con multicolinealidad baja. Pero su poder explicativo es bajo vs modelos tecnológicos, y en 5d/30d aparecen autocorrelación (por retornos rodantes) y en 30d también heterocedasticidad.
+
+#MODELO C: ETF's e indicadores
+
+##Modelo C 1 día
+```{r}
+dfC_1 <- data.frame(
+  MSFT = ret_k(prices_C[,"MSFT"], 1),
+  SPY  = ret_k(prices_C[,"SPY"], 1),
+  XLK  = ret_k(prices_C[,"XLK"], 1),
+  IGV  = ret_k(prices_C[,"IGV"], 1),
+  SMH  = ret_k(prices_C[,"SMH"], 1),
+  TLT  = ret_k(prices_C[,"TLT"], 1)
+)
+modeloC_1 <- lm(MSFT ~ SPY + XLK + IGV + SMH + TLT, data=dfC_1)
+```
+
+##Resumen del modelo a 1 día
+```{r}
+summary(modeloC_1)
+```
+###El R ajustado es muy alto y el mejor hasta ahora, los ETF XLK y IGV tienen una exposición fuerte a tecnonología y software
+
+###Multicolinealidad
+```{r}
+cor(dfC_1[, c("SPY","XLK","IGV","SMH","TLT")])
+vif(modeloC_1)
+```
+###Alta (correlaciones muy altas: SPY–XLK=0.92, XLK–SMH=0.91; VIF XLK=18, SPY=6.7, SMH=6.7).
+
+##Homocedasticidad
+```{r}
+bptest(modeloC_1)
+gqtest(modeloC_1, order.by = ~ MSFT, data=dfC_1)
+```
+###Existe (BP p≈5e-05, GQ p≈0.00022)
+
+##Autocorrelación
+```{r}
+dwtest(modeloC_1)
+```
+
+##Serie de tiempo y su autocorrelación
+```{r}
+serieC_1 <- ts(resid(modeloC_1))
+regC_1 <- dynlm(serieC_1 ~ L(serieC_1))
+regC_1
+dwtest(regC_1)
+```
+### No existe autocorrelación no (DW=2.08; AR(1) pequeño).
+
+###Conclusión: Excelente para explicar MSFT a 1 día por factores tech, pero con colinealidad alta y heterocedasticidad.
+
+##Modelo B 5 días
+```{r}
+dfC_5 <- data.frame(
+  MSFT = ret_k(prices_C[,"MSFT"], 5),
+  SPY  = ret_k(prices_C[,"SPY"], 5),
+  XLK  = ret_k(prices_C[,"XLK"], 5),
+  IGV  = ret_k(prices_C[,"IGV"], 5),
+  SMH  = ret_k(prices_C[,"SMH"], 5),
+  TLT  = ret_k(prices_C[,"TLT"], 5)
+)
+
+modeloC_5 <- lm(MSFT ~ SPY + XLK + IGV + SMH + TLT, data=dfC_5)
+```
+
+##Resumen del modelo a 1 día
+```{r}
+summary(modeloC_5)
+```
+###El modelo mantiene gran fuerza de amarre en el R ajustado por lo que nos podría servir para explicar el movimiento de la acción a 5 días sobretodo manteniendo XLK y IGV como indicadores
+
+##Multicolinealidad
+```{r}
+cor(dfC_5[, c("SPY","XLK","IGV","SMH","TLT")])
+vif(modeloC_5)
+```
+### Alta (VIF XLK=14.5, SMH=5.94, SPY=5.27).
+
+##Homocedasticidad
+```{r}
+bptest(modeloC_5)
+gqtest(modeloC_5, order.by = ~ MSFT, data=dfC_5)
+```
+### Existe (BP p=0.023, GQ p=3.4e-05).
+
+##Autocorrelación
+```{r}
+dwtest(modeloC_5)
+```
+
+##Serie de tiempo y su autocorrelación
+```{r}
+serieC_5 <- ts(resid(modeloC_5))
+regC_5 <- dynlm(serieC_5 ~ L(serieC_5))
+regC_5
+dwtest(regC_5)
+```
+### Hay una fuerte autocorrelación en el modelo original y en el de serie
+
+###Conclusión: gran ajuste, pero en 5 días reaparece el problema fuerte de autocorrelación por retornos rodantes.
+
+##Modelo B 30 días
+```{r}
+dfC_30 <- data.frame(
+  MSFT = ret_k(prices_C[,"MSFT"], 30),
+  SPY  = ret_k(prices_C[,"SPY"], 30),
+  XLK  = ret_k(prices_C[,"XLK"], 30),
+  IGV  = ret_k(prices_C[,"IGV"], 30),
+  SMH  = ret_k(prices_C[,"SMH"], 30),
+  TLT  = ret_k(prices_C[,"TLT"], 30)
+)
+
+modeloC_30 <- lm(MSFT ~ SPY + XLK + IGV + SMH + TLT, data=dfC_30)
+```
+
+##Resumen del modelo a 30 días
+```{r}
+summary(modeloC_30)
+```
+### Sigue manteniendo gran fuerza de relación entre la acción y los ETF's
+
+##Multicolinealidad
+```{r}
+cor(dfC_30[, c("SPY","XLK","IGV","SMH","TLT")])
+vif(modeloC_30)
+```
+###Alta (VIF XLK=17.4, SMH=7.53, SPY=5.61).
+
+##Homocedasticidad
+```{r}
+bptest(modeloC_30)
+gqtest(modeloC_30, order.by = ~ MSFT, data=dfC_30)
+```
+###Existe y es fuerte (BP p<2e-16, GQ p=5e-13).
+
+##Autocorrelación
+```{r}
+dwtest(modeloC_30)
+```
+
+##Serie de tiempo y su autocorrelación
+```{r}
+serieC_30 <- ts(resid(modeloC_30))
+regC_30 <- dynlm(serieC_30 ~ L(serieC_30))
+regC_30
+dwtest(regC_30)
+```
+###muy fuerte en el modelo original (DW=0.088)al ajustar AR(1) se elimina (DW=2.05). 
+
+###Conclusión: Es el modelo más fuerte en explicación de Microsoft al tener un R ajustado entre 0.71-0.74, y consistentemente muestra que MSFT está dominada por factor Tech/Software (XLK, IGV) y con señal de tasas (TLT) en 30 días. Su principal debilidad es la multicolinealidad muy alta (sobre todo por SPY vs XLK vs SMH) y la heterocedasticidad; además, en 5d y 30d aparece autocorrelación fuerte por el traslape de retornos.
+
+
+###¿Qué modelo es mejor?
+###El Modelo C (ETFs/factores) es el que mejor explica a MSFT (mayor R), pero sufre multicolinealidad alta (VIF grandes) y heterocedasticidad.
+###El Modelo A (Tech) también explica bien (alto R) con VIF bajos, por lo que sus coeficientes son más interpretables, aunque presenta heterocedasticidad.
+###El Modelo B (otros sectores) explica poco (bajo), pero es útil para argumentar diversificación.
+
